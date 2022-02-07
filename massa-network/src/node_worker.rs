@@ -8,6 +8,7 @@ use crate::settings::{NetworkSettings, NODE_SEND_CHANNEL_SIZE};
 use crate::{error::NetworkError, ConnectionClosureReason};
 use massa_logging::massa_trace;
 use massa_models::node::NodeId;
+use massa_models::storage::Storage;
 use massa_models::{Block, BlockHeader, BlockId, Endorsement, Operation};
 use std::net::IpAddr;
 use tokio::{
@@ -25,9 +26,9 @@ pub enum NodeCommand {
     /// Send given peer list to node.
     SendPeerList(Vec<IpAddr>),
     /// Send that block to node.
-    SendBlock(Block),
+    SendBlock(BlockId),
     /// Send the header of a block to a node.
-    SendBlockHeader(BlockHeader),
+    SendBlockHeader(BlockId),
     /// Ask for a block from that node.
     AskForBlocks(Vec<BlockId>),
     /// Close the node worker.
@@ -81,6 +82,8 @@ pub struct NodeWorker {
     node_command_rx: mpsc::Receiver<NodeCommand>,
     /// Channel to send node events.
     node_event_tx: mpsc::Sender<NodeEvent>,
+    /// Shared storage.
+    storage: Storage,
 }
 
 impl NodeWorker {
@@ -101,6 +104,7 @@ impl NodeWorker {
         socket_writer: WriteBinder,
         node_command_rx: mpsc::Receiver<NodeCommand>,
         node_event_tx: mpsc::Sender<NodeEvent>,
+        storage: Storage,
     ) -> NodeWorker {
         NodeWorker {
             cfg,
@@ -109,6 +113,7 @@ impl NodeWorker {
             socket_writer_opt: Some(socket_writer),
             node_command_rx,
             node_event_tx,
+            storage,
         }
     }
 
@@ -316,15 +321,25 @@ impl NodeWorker {
                                 break;
                             }
                         },
-                        Some(NodeCommand::SendBlockHeader(header)) => {
-                            massa_trace!("node_worker.run_loop. send Message::BlockHeader", {"hash": header.compute_block_id()?, "header": header, "node": self.node_id});
-                            if self.try_send_to_node(&writer_command_tx, Message::BlockHeader(header)).is_err() {
+                        Some(NodeCommand::SendBlockHeader(block_id)) => {
+                            massa_trace!("node_worker.run_loop. send Message::BlockHeader", {"hash": block_id, "node": self.node_id});
+                            let block = self
+                                .storage
+                                .retrieve_block(&block_id)
+                                .unwrap();
+                            let block = block.read();
+                            if self.try_send_to_node(&writer_command_tx, Message::BlockHeader(block.header.clone())).is_err() {
                                 break;
                             }
                         },
-                        Some(NodeCommand::SendBlock(block)) => {
-                            massa_trace!("node_worker.run_loop. send Message::Block", {"hash": block.header.compute_block_id()?, "block": block, "node": self.node_id});
-                            if self.try_send_to_node(&writer_command_tx, Message::Block(block)).is_err() {
+                        Some(NodeCommand::SendBlock(block_id)) => {
+                            massa_trace!("node_worker.run_loop. send Message::Block", {"hash": block_id, "node": self.node_id});
+                            let block = self
+                                .storage
+                                .retrieve_block(&block_id)
+                                .unwrap();
+                            let block = block.read();
+                            if self.try_send_to_node(&writer_command_tx, Message::Block(block.clone())).is_err() {
                                 break;
                             }
                             trace!("after sending Message::Block from writer_command_tx in node_worker run_loop");

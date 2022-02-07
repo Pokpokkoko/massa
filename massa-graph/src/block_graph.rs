@@ -283,7 +283,7 @@ pub struct BlockGraph {
     /// All the cliques
     max_cliques: Vec<Clique>,
     /// Blocks that need to be propagated
-    to_propagate: Map<BlockId, (Block, Set<OperationId>, Vec<EndorsementId>)>,
+    to_propagate: Map<BlockId, (Set<OperationId>, Vec<EndorsementId>)>,
     /// List of block ids we think are attack attempts
     attack_attempts: Vec<BlockId>,
     /// Newly final blocks
@@ -1836,7 +1836,6 @@ impl BlockGraph {
             self.to_propagate.insert(
                 block_id,
                 (
-                    valid_block.clone(),
                     active.operation_set.keys().copied().collect(),
                     active.endorsement_ids.keys().copied().collect(),
                 ),
@@ -3666,11 +3665,11 @@ impl BlockGraph {
             .collect()
     }
 
-    /// Get the headers to be propagated.
+    /// Get the block id's to be propagated.
     /// Must be called by the consensus worker within `block_db_changed`.
     pub fn get_blocks_to_propagate(
         &mut self,
-    ) -> Map<BlockId, (Block, Set<OperationId>, Vec<EndorsementId>)> {
+    ) -> Map<BlockId, (Set<OperationId>, Vec<EndorsementId>)> {
         mem::take(&mut self.to_propagate)
     }
 
