@@ -2,15 +2,15 @@
 
 use super::{
     binders::{ReadBinder, WriteBinder},
-    messages::Message,
+    messages::{Message, MessageTypeId},
 };
 use crate::settings::{NetworkSettings, NODE_SEND_CHANNEL_SIZE};
 use crate::{error::NetworkError, ConnectionClosureReason};
 use massa_logging::massa_trace;
 use massa_models::node::NodeId;
 use massa_models::storage::Storage;
-use massa_models::SerializeCompact;
 use massa_models::{Block, BlockHeader, BlockId, Endorsement, Operation};
+use massa_models::{SerializeCompact, SerializeVarInt};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use tokio::{
@@ -179,6 +179,7 @@ impl NodeWorker {
         })?;
         let write_timeout = self.cfg.message_timeout;
         let node_id_copy = self.node_id;
+        let storage = self.storage.clone();
         let node_writer_handle = tokio::spawn(async move {
             loop {
                 match writer_command_rx.recv().await {
@@ -186,10 +187,39 @@ impl NodeWorker {
                         let bytes_vec: Vec<u8> = match to_send {
                             ToSend::Msg(msg) => msg.to_bytes_compact().unwrap(),
                             ToSend::Block(block_id) => {
-                                break;
+                                // TODO: precisely allocate?
+                                let mut res: Vec<u8> = Vec::new();
+                                res.extend(u32::from(MessageTypeId::Block).to_varint_bytes());
+
+                                let block = storage.retrieve_block(&block_id).unwrap();
+                                let mut stored_block = block.write();
+                                if let Some(serialized) = stored_block.serialized.as_ref() {
+                                    res.extend(serialized);
+                                } else {
+                                    let serialized = stored_block.block.to_bytes_compact()?;
+                                    res.extend(&serialized);
+                                    stored_block.serialized = Some(serialized);
+                                }
+
+                                res
                             }
                             ToSend::Header(block_id) => {
-                                break;
+                                // TODO: precisely allocate?
+                                let mut res: Vec<u8> = Vec::new();
+                                res.extend(u32::from(MessageTypeId::BlockHeader).to_varint_bytes());
+
+                                let block = storage.retrieve_block(&block_id).unwrap();
+                                let mut stored_block = block.write();
+                                if let Some(serialized) = stored_block.serialized_header.as_ref() {
+                                    res.extend(serialized);
+                                } else {
+                                    let serialized =
+                                        stored_block.block.header.to_bytes_compact()?;
+                                    res.extend(&serialized);
+                                    stored_block.serialized_header = Some(serialized);
+                                }
+
+                                res
                             }
                         };
                         match timeout(write_timeout.to_duration(), socket_writer.send(&bytes_vec))
@@ -343,22 +373,12 @@ impl NodeWorker {
                         },
                         Some(NodeCommand::SendBlockHeader(block_id)) => {
                             massa_trace!("node_worker.run_loop. send Message::BlockHeader", {"hash": block_id, "node": self.node_id});
-                            let block = self
-                                .storage
-                                .retrieve_block(&block_id)
-                                .unwrap();
-                            let block = block.read();
                             if self.try_send_to_node(&writer_command_tx, ToSend::Header(block_id)).is_err() {
                                 break;
                             }
                         },
                         Some(NodeCommand::SendBlock(block_id)) => {
                             massa_trace!("node_worker.run_loop. send Message::Block", {"hash": block_id, "node": self.node_id});
-                            let block = self
-                                .storage
-                                .retrieve_block(&block_id)
-                                .unwrap();
-                            let block = block.read();
                             if self.try_send_to_node(&writer_command_tx, ToSend::Block(block_id)).is_err() {
                                 break;
                             }
