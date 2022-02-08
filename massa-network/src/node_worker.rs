@@ -11,6 +11,7 @@ use massa_models::node::NodeId;
 use massa_models::storage::Storage;
 use massa_models::SerializeCompact;
 use massa_models::{Block, BlockHeader, BlockId, Endorsement, Operation};
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use tokio::{
     sync::mpsc,
@@ -21,6 +22,13 @@ use tokio::{
     time::timeout,
 };
 use tracing::{debug, trace, warn};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ToSend {
+    Msg(Message),
+    Block(BlockId),
+    Header(BlockId),
+}
 
 #[derive(Clone, Debug)]
 pub enum NodeCommand {
@@ -142,8 +150,8 @@ impl NodeWorker {
     /// If the channel dropped, return an error
     pub fn try_send_to_node(
         &self,
-        sender: &Sender<Message>,
-        msg: Message,
+        sender: &Sender<ToSend>,
+        msg: ToSend,
     ) -> Result<(), NetworkError> {
         match sender.try_send(msg) {
             Err(TrySendError::Full(_)) => {
@@ -163,7 +171,7 @@ impl NodeWorker {
     /// node event loop. Consumes self.
     pub async fn run_loop(mut self) -> Result<ConnectionClosureReason, NetworkError> {
         let (writer_command_tx, mut writer_command_rx) =
-            mpsc::channel::<Message>(NODE_SEND_CHANNEL_SIZE);
+            mpsc::channel::<ToSend>(NODE_SEND_CHANNEL_SIZE);
         let mut socket_writer = self.socket_writer_opt.take().ok_or_else(|| {
             NetworkError::GeneralProtocolError(
                 "NodeWorker call run_loop more than once".to_string(),
@@ -174,14 +182,22 @@ impl NodeWorker {
         let node_writer_handle = tokio::spawn(async move {
             loop {
                 match writer_command_rx.recv().await {
-                    Some(msg) => {
-                        let bytes_vec: Vec<u8> = msg.to_bytes_compact().unwrap();
+                    Some(to_send) => {
+                        let bytes_vec: Vec<u8> = match to_send {
+                            ToSend::Msg(msg) => msg.to_bytes_compact().unwrap(),
+                            ToSend::Block(block_id) => {
+                                break;
+                            }
+                            ToSend::Header(block_id) => {
+                                break;
+                            }
+                        };
                         match timeout(write_timeout.to_duration(), socket_writer.send(&bytes_vec))
                             .await
                         {
                             Err(_err) => {
                                 massa_trace!("node_worker.run_loop.loop.writer_command_rx.recv.send.timeout", {
-                                    "node": node_id_copy, "msg": msg
+                                    "node": node_id_copy,
                                 });
                                 return Err(std::io::Error::new(
                                     std::io::ErrorKind::TimedOut,
@@ -191,13 +207,13 @@ impl NodeWorker {
                             }
                             Ok(Err(err)) => {
                                 massa_trace!("node_worker.run_loop.loop.writer_command_rx.recv.send.error", {
-                                    "node": node_id_copy, "err":  format!("{}", err), "msg": msg
+                                    "node": node_id_copy, "err":  format!("{}", err),
                                 });
                                 return Err(err);
                             }
                             Ok(Ok(id)) => {
                                 massa_trace!("node_worker.run_loop.loop.writer_command_rx.recv.send.ok", {
-                                    "node": node_id_copy, "msg_id": id, "msg": msg
+                                    "node": node_id_copy, "msg_id": id,
                                 })
                             }
                         }
@@ -321,7 +337,7 @@ impl NodeWorker {
                         },
                         Some(NodeCommand::SendPeerList(ip_vec)) => {
                             massa_trace!("node_worker.run_loop. send Message::PeerList", {"peerlist": ip_vec, "node": self.node_id});
-                            if self.try_send_to_node(&writer_command_tx, Message::PeerList(ip_vec)).is_err() {
+                            if self.try_send_to_node(&writer_command_tx, ToSend::Msg(Message::PeerList(ip_vec))).is_err() {
                                 break;
                             }
                         },
@@ -332,7 +348,7 @@ impl NodeWorker {
                                 .retrieve_block(&block_id)
                                 .unwrap();
                             let block = block.read();
-                            if self.try_send_to_node(&writer_command_tx, Message::BlockHeader(block.header.clone())).is_err() {
+                            if self.try_send_to_node(&writer_command_tx, ToSend::Header(block_id)).is_err() {
                                 break;
                             }
                         },
@@ -343,7 +359,7 @@ impl NodeWorker {
                                 .retrieve_block(&block_id)
                                 .unwrap();
                             let block = block.read();
-                            if self.try_send_to_node(&writer_command_tx, Message::Block(block.clone())).is_err() {
+                            if self.try_send_to_node(&writer_command_tx, ToSend::Block(block_id)).is_err() {
                                 break;
                             }
                             trace!("after sending Message::Block from writer_command_tx in node_worker run_loop");
@@ -352,14 +368,14 @@ impl NodeWorker {
                             // cut hash list on sub list if exceed max_ask_blocks_per_message
                             massa_trace!("node_worker.run_loop. send Message::AskForBlocks", {"hashlist": list, "node": self.node_id});
                             for to_send_list in list.chunks(crate::settings::MAX_ASK_BLOCKS_PER_MESSAGE as usize) {
-                                if self.try_send_to_node(&writer_command_tx, Message::AskForBlocks(to_send_list.to_vec())).is_err() {
+                                if self.try_send_to_node(&writer_command_tx, ToSend::Msg(Message::AskForBlocks(to_send_list.to_vec()))).is_err() {
                                     break 'select_loop;
                                 }
                             }
                         },
                         Some(NodeCommand::BlockNotFound(hash)) => {
                             massa_trace!("node_worker.run_loop. send Message::BlockNotFound", {"hash": hash, "node": self.node_id});
-                            if self.try_send_to_node(&writer_command_tx, Message::BlockNotFound(hash)).is_err() {
+                            if self.try_send_to_node(&writer_command_tx, ToSend::Msg(Message::BlockNotFound(hash))).is_err() {
                                 break;
                             }
                         },
@@ -367,7 +383,7 @@ impl NodeWorker {
                             massa_trace!("node_worker.run_loop. send Message::SendOperations", {"node": self.node_id, "operations": operations});
                             // cut operation list if it exceed max_operations_per_message
                             for to_send_list in operations.chunks(crate::settings::MAX_OPERATIONS_PER_MESSAGE as usize) {
-                                if self.try_send_to_node(&writer_command_tx, Message::Operations(to_send_list.to_vec())).is_err() {
+                                if self.try_send_to_node(&writer_command_tx, ToSend::Msg(Message::Operations(to_send_list.to_vec()))).is_err() {
                                     break 'select_loop;
                                 }
                             }
@@ -376,7 +392,7 @@ impl NodeWorker {
                             massa_trace!("node_worker.run_loop. send Message::SendEndorsements", {"node": self.node_id, "endorsements": endorsements});
                             // cut endorsement list if it exceed max_endorsements_per_message
                             for to_send_list in endorsements.chunks(crate::settings::MAX_ENDORSEMENTS_PER_MESSAGE as usize) {
-                                if self.try_send_to_node(&writer_command_tx, Message::Endorsements(to_send_list.to_vec())).is_err() {
+                                if self.try_send_to_node(&writer_command_tx, ToSend::Msg(Message::Endorsements(to_send_list.to_vec()))).is_err() {
                                     break 'select_loop;
                                 }
                             }
@@ -394,7 +410,7 @@ impl NodeWorker {
                     debug!("timer-based asking node_id={} for peer list", self.node_id);
                     massa_trace!("node_worker.run_loop. timer_ask_peer_list", {"node_id": self.node_id});
                     massa_trace!("node_worker.run_loop.select.timer send Message::AskPeerList", {"node": self.node_id});
-                    writer_command_tx.send(Message::AskPeerList).await.map_err(
+                    writer_command_tx.send(ToSend::Msg(Message::AskPeerList)).await.map_err(
                         |_| NetworkError::ChannelError("writer send ask peer list failed".into())
                     )?;
                     trace!("after sending Message::AskPeerList from writer_command_tx in node_worker run_loop");
