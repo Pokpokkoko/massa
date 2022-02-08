@@ -35,11 +35,9 @@ impl WriteBinder {
     ///
     /// # Argument
     /// * msg: date to transmit.
-    pub async fn send(&mut self, msg: &Message) -> Result<u64, NetworkError> {
+    pub async fn send(&mut self, buf: &[u8]) -> Result<u64, NetworkError> {
         //        massa_trace!("binder.send", { "msg": msg });
-        // serialize
-        let bytes_vec = msg.to_bytes_compact()?;
-        let msg_size: u32 = bytes_vec
+        let msg_size: u32 = buf
             .len()
             .try_into()
             .map_err(|_| NetworkError::GeneralProtocolError("message too long".into()))?;
@@ -51,7 +49,7 @@ impl WriteBinder {
             .await?;
 
         // send message
-        self.write_half.write_all(&bytes_vec[..]).await?;
+        self.write_half.write_all(buf).await?;
 
         let res_index = self.message_index;
         self.message_index += 1;

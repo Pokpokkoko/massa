@@ -13,6 +13,7 @@ use futures::future::try_join;
 use massa_hash::hash::Hash;
 use massa_logging::massa_trace;
 use massa_models::node::NodeId;
+use massa_models::SerializeCompact;
 use massa_models::Version;
 use massa_signature::{sign, verify_signature, PrivateKey};
 use massa_time::MassaTime;
@@ -102,7 +103,8 @@ impl HandshakeWorker {
             random_bytes: self_random_bytes,
             version: self.version,
         };
-        let send_init_fut = self.writer.send(&send_init_msg);
+        let bytes_vec: Vec<u8> = send_init_msg.to_bytes_compact().unwrap();
+        let send_init_fut = self.writer.send(&bytes_vec);
 
         // receive handshake init future
         let recv_init_fut = self.reader.next();
@@ -146,7 +148,8 @@ impl HandshakeWorker {
         let send_reply_msg = Message::HandshakeReply {
             signature: self_signature,
         };
-        let send_reply_fut = self.writer.send(&send_reply_msg);
+        let bytes_vec: Vec<u8> = send_reply_msg.to_bytes_compact().unwrap();
+        let send_reply_fut = self.writer.send(&bytes_vec);
 
         // receive handshake reply future
         let recv_reply_fut = self.reader.next();

@@ -9,6 +9,7 @@ use crate::{error::NetworkError, ConnectionClosureReason};
 use massa_logging::massa_trace;
 use massa_models::node::NodeId;
 use massa_models::storage::Storage;
+use massa_models::SerializeCompact;
 use massa_models::{Block, BlockHeader, BlockId, Endorsement, Operation};
 use std::net::IpAddr;
 use tokio::{
@@ -174,7 +175,10 @@ impl NodeWorker {
             loop {
                 match writer_command_rx.recv().await {
                     Some(msg) => {
-                        match timeout(write_timeout.to_duration(), socket_writer.send(&msg)).await {
+                        let bytes_vec: Vec<u8> = msg.to_bytes_compact().unwrap();
+                        match timeout(write_timeout.to_duration(), socket_writer.send(&bytes_vec))
+                            .await
+                        {
                             Err(_err) => {
                                 massa_trace!("node_worker.run_loop.loop.writer_command_rx.recv.send.timeout", {
                                     "node": node_id_copy, "msg": msg
