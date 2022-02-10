@@ -192,14 +192,8 @@ impl NodeWorker {
                                 res.extend(u32::from(MessageTypeId::Block).to_varint_bytes());
 
                                 let block = storage.retrieve_block(&block_id).unwrap();
-                                let mut stored_block = block.write();
-                                if let Some(serialized) = stored_block.serialized.as_ref() {
-                                    res.extend(serialized);
-                                } else {
-                                    let serialized = stored_block.block.to_bytes_compact()?;
-                                    res.extend(&serialized);
-                                    stored_block.serialized = Some(serialized);
-                                }
+                                let stored_block = block.read();
+                                res.extend(&stored_block.serialized);
 
                                 res
                             }
@@ -300,7 +294,7 @@ impl NodeWorker {
 
                 // incoming socket data
                 res = self.socket_reader.next() => match res {
-                    Ok(Some((index, msg))) => {
+                    Ok(Some((index, msg, buff))) => {
                         massa_trace!(
                             "node_worker.run_loop. receive self.socket_reader.next()", {"index": index});
                         match msg {
@@ -309,6 +303,9 @@ impl NodeWorker {
                                     "node_worker.run_loop. receive Message::Block",
                                     {"block_id": block.header.compute_block_id()?, "block": block, "node": self.node_id}
                                 );
+
+                                // TODO: avoid computing id, and cloning block.
+                                self.storage.store_block(block.header.compute_block_id()?, block.clone(), buff);
                                 self.send_node_event(NodeEvent(self.node_id, NodeEventType::ReceivedBlock(block))).await;
                             },
                             Message::BlockHeader(header) => {

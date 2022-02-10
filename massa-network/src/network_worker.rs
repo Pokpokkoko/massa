@@ -1083,7 +1083,10 @@ impl NetworkWorker {
                     let mut reader = ReadBinder::new(reader);
                     match tokio::time::timeout(
                         timeout,
-                        futures::future::try_join(writer.send(&msg), reader.next()),
+                        futures::future::try_join(
+                            writer.send(&msg.to_bytes_compact().unwrap()),
+                            reader.next(),
+                        ),
                     )
                     .await
                     {

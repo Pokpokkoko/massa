@@ -119,7 +119,7 @@ impl HandshakeWorker {
             Err(_) => throw!(HandshakeTimeout),
             Ok(Err(e)) => return Err(e),
             Ok(Ok((_, None))) => throw!(HandshakeInterruption, "init".into()),
-            Ok(Ok((_, Some((_, msg))))) => match msg {
+            Ok(Ok((_, Some((_, msg, _))))) => match msg {
                 Message::HandshakeInitiation {
                     public_key: pk,
                     random_bytes: rb,
@@ -164,7 +164,7 @@ impl HandshakeWorker {
             Err(_) => throw!(HandshakeTimeout),
             Ok(Err(e)) => return Err(e),
             Ok(Ok((_, None))) => throw!(HandshakeInterruption, "repl".into()),
-            Ok(Ok((_, Some((_, msg))))) => match msg {
+            Ok(Ok((_, Some((_, msg, _))))) => match msg {
                 Message::HandshakeReply { signature: sig } => sig,
                 _ => throw!(HandshakeWrongMessage),
             },

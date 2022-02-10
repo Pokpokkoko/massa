@@ -9,6 +9,7 @@ use massa_models::{
     SerializeMinBEInt,
 };
 use std::convert::TryInto;
+use std::mem;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Used to serialize and send data.
@@ -85,7 +86,7 @@ impl ReadBinder {
     }
 
     /// Awaits the next incoming message and deserializes it. Async cancel-safe.
-    pub async fn next(&mut self) -> Result<Option<(u64, Message)>, NetworkError> {
+    pub async fn next(&mut self) -> Result<Option<(u64, Message, Vec<u8>)>, NetworkError> {
         let max_message_size = with_serialization_context(|context| context.max_message_size);
 
         // read message size
@@ -142,10 +143,10 @@ impl ReadBinder {
         let (res_msg, _res_msg_len) = Message::from_bytes_compact(&self.buf)?;
         self.cursor = 0;
         self.msg_size = None;
-        self.buf.clear();
+        let buf = mem::take(&mut self.buf);
 
         let res_index = self.message_index;
         self.message_index += 1;
-        Ok(Some((res_index, res_msg)))
+        Ok(Some((res_index, res_msg, buf)))
     }
 }
