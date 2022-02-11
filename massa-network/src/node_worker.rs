@@ -12,6 +12,7 @@ use massa_models::storage::Storage;
 use massa_models::{Block, BlockHeader, BlockId, Endorsement, Operation};
 use massa_models::{SerializeCompact, SerializeVarInt};
 use serde::{Deserialize, Serialize};
+use std::mem;
 use std::net::IpAddr;
 use tokio::{
     sync::mpsc,
@@ -187,15 +188,9 @@ impl NodeWorker {
                         let bytes_vec: Vec<u8> = match to_send {
                             ToSend::Msg(msg) => msg.to_bytes_compact().unwrap(),
                             ToSend::Block(block_id) => {
-                                // TODO: precisely allocate?
-                                let mut res: Vec<u8> = Vec::new();
-                                res.extend(u32::from(MessageTypeId::Block).to_varint_bytes());
-
                                 let block = storage.retrieve_block(&block_id).unwrap();
-                                let stored_block = block.read();
-                                res.extend(&stored_block.serialized);
-
-                                res
+                                let mut stored_block = block.write();
+                                mem::take(&mut stored_block.serialized)
                             }
                             ToSend::Header(block_id) => {
                                 // TODO: precisely allocate?
