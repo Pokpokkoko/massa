@@ -1,8 +1,8 @@
 use crate::tests::tools::get_dummy_block_id;
 use massa_consensus_exports::ConsensusConfig;
 use massa_graph::{
-    create_genesis_block, export_active_block::ExportActiveBlock, ledger::LedgerSubset, BlockGraph,
-    BootstrapableGraph,
+    create_genesis_block, export_active_block::ExportActiveBlock, ledger::LedgerSubset,
+    settings::GraphConfig, BlockGraph, BootstrapableGraph,
 };
 use massa_hash::hash::Hash;
 use massa_models::{
@@ -146,8 +146,9 @@ pub async fn test_get_ledger_at_parents() {
         Address::from_bs58_check("21bU2xruH7bFzfcUhJ6SGjnLmC9cMt1kxzqFr11eV58uj7Ui8h").unwrap();
     assert_eq!(1, address_d.get_thread(thread_count));
 
-    let (hash_genesist0, block_genesist0) = create_genesis_block(&(&cfg).into(), 0).unwrap();
-    let (hash_genesist1, block_genesist1) = create_genesis_block(&(&cfg).into(), 1).unwrap();
+    let graph_cfg = GraphConfig::from(&cfg);
+    let (hash_genesist0, block_genesist0) = create_genesis_block(&graph_cfg, 0).unwrap();
+    let (hash_genesist1, block_genesist1) = create_genesis_block(&graph_cfg, 1).unwrap();
     let export_genesist0 = ExportActiveBlock {
         block: block_genesist0,
         parents: vec![],  // one (hash, period) per thread ( if not genesis )
@@ -363,12 +364,30 @@ pub async fn test_get_ledger_at_parents() {
         active_blocks: vec![
             (hash_genesist0, export_genesist0),
             (hash_genesist1, export_genesist1),
-            (get_dummy_block_id("blockp1t0"), (&blockp1t0).into()),
-            (get_dummy_block_id("blockp1t1"), (&blockp1t1).into()),
-            (get_dummy_block_id("blockp2t0"), (&blockp2t0).into()),
-            (get_dummy_block_id("blockp2t1"), (&blockp2t1).into()),
-            (get_dummy_block_id("blockp3t0"), (&blockp3t0).into()),
-            (get_dummy_block_id("blockp3t1"), (&blockp3t1).into()),
+            (
+                get_dummy_block_id("blockp1t0"),
+                ExportActiveBlock::from(&blockp1t0),
+            ),
+            (
+                get_dummy_block_id("blockp1t1"),
+                ExportActiveBlock::from(&blockp1t1),
+            ),
+            (
+                get_dummy_block_id("blockp2t0"),
+                ExportActiveBlock::from(&blockp2t0),
+            ),
+            (
+                get_dummy_block_id("blockp2t1"),
+                ExportActiveBlock::from(&blockp2t1),
+            ),
+            (
+                get_dummy_block_id("blockp3t0"),
+                ExportActiveBlock::from(&blockp3t0),
+            ),
+            (
+                get_dummy_block_id("blockp3t1"),
+                ExportActiveBlock::from(&blockp3t1),
+            ),
         ]
         .into_iter()
         .collect(),
@@ -407,7 +426,7 @@ pub async fn test_get_ledger_at_parents() {
         ),
     };
 
-    let block_graph = BlockGraph::new((&cfg).into(), Some(export_graph))
+    let block_graph = BlockGraph::new(GraphConfig::from(&cfg), Some(export_graph))
         .await
         .unwrap();
 
@@ -587,7 +606,9 @@ fn test_bootsrapable_graph_serialize_compact() {
 async fn test_clique_calculation() {
     let ledger_file = generate_ledger_file(&Map::default());
     let cfg = ConsensusConfig::from(ledger_file.path());
-    let mut block_graph = BlockGraph::new((&cfg).into(), None).await.unwrap();
+    let mut block_graph = BlockGraph::new(GraphConfig::from(&cfg), None)
+        .await
+        .unwrap();
     let hashes: Vec<BlockId> = vec![
         "VzCRpnoZVYY1yQZTXtVQbbxwzdu6hYtdCUZB5BXWSabsiXyfP",
         "JnWwNHRR1tUD7UJfnEFgDB4S4gfDTX2ezLadr7pcwuZnxTvn1",
